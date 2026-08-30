@@ -79,6 +79,9 @@ export default function GijirokuApp() {
     };
 
     recognition.onerror = (event) => {
+       recognition.onerror = (event) => {
+      // no-speech（無音区間）とaborted（停止操作）は正常な動作なので無視する
+      if (event.error === "no-speech" || event.error === "aborted") return;
       setSupportError(`音声認識エラー: ${event.error}`);
     };
 

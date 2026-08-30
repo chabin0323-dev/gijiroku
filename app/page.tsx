@@ -17,7 +17,7 @@ export default function GijirokuApp() {
   const isRecordingRef = useRef(false);
 
   // 認識結果の信頼度がこれ未満（雑音・小さい声など）の場合は採用しない
-    const CONFIDENCE_THRESHOLD = 0.3;
+  const CONFIDENCE_THRESHOLD = 0.5;
 
   useEffect(() => {
     return () => stopEverything();
@@ -79,7 +79,6 @@ export default function GijirokuApp() {
     };
 
     recognition.onerror = (event) => {
-       recognition.onerror = (event) => {
       // no-speech（無音区間）とaborted（停止操作）は正常な動作なので無視する
       if (event.error === "no-speech" || event.error === "aborted") return;
       setSupportError(`音声認識エラー: ${event.error}`);

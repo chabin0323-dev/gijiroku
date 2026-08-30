@@ -17,7 +17,7 @@ export default function GijirokuApp() {
   const isRecordingRef = useRef(false);
 
   // 認識結果の信頼度がこれ未満（雑音・小さい声など）の場合は採用しない
-  const CONFIDENCE_THRESHOLD = 0.5;
+    const CONFIDENCE_THRESHOLD = 0.3;
 
   useEffect(() => {
     return () => stopEverything();

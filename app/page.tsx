@@ -1,4 +1,5 @@
 "use client";
+
 import React, { useState, useRef, useEffect } from "react";
 import { Mic, UploadCloud, Lock, Scissors, Zap, Sparkles, Square } from "lucide-react";
 
@@ -74,7 +75,7 @@ export default function GijirokuApp() {
 
     const SpeechRecognition =
       typeof window !== "undefined" &&
-      (window.SpeechRecognition || window.webkitSpeechRecognition);
+      ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
     if (!SpeechRecognition) {
       setSupportError(
@@ -93,7 +94,7 @@ export default function GijirokuApp() {
       });
       streamRef.current = stream;
 
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
       const audioCtx = new AudioContext();
       audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);

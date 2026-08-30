@@ -1,128 +1,334 @@
 "use client";
-import React, { useState, useEffect } from 'react';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import React, { useState, useRef, useEffect } from "react";
+import { Mic, UploadCloud, Lock, Scissors, Zap, Sparkles, Square } from "lucide-react";
 
-// --- 定数定義 ---
-const MAX_USAGE = 5;
-const YEARS = Array.from({ length: 80 }, (_, i) => `${2026 - i}年`);
-const MONTHS = Array.from({ length: 12 }, (_, i) => `${i + 1}月`);
-const DAYS = Array.from({ length: 31 }, (_, i) => `${i + 1}日`);
-const BLOOD_TYPES = ['A型', 'B型', 'O型', 'AB型'];
-const ZODIAC_SIGNS = ['牡羊座', '牡牛座', '双子座', '蟹座', '獅子座', '乙女座', '天秤座', '蠍座', '射手座', '山羊座', '水瓶座', '魚座'];
-const ETO = ['子（ね）', '丑（うし）', '寅（とら）', '卯（う）', '辰（たつ）', '巳（み）', '午（うま）', '未（ひつじ）', '申（さる）', '酉（とり）', '戌（いぬ）', '亥（い）'];
+export default function GijirokuApp() {
+  const [inputMethod, setInputMethod] = useState("mic"); // 'mic' | 'upload'
+  const [isRecording, setIsRecording] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [interim, setInterim] = useState("");
+  const [detailMode, setDetailMode] = useState("detail"); // 'detail' | 'summary'
+  const [remaining, setRemaining] = useState(5);
+  const [minutes, setMinutes] = useState(null);
+  const [micLevel, setMicLevel] = useState(0);
+  const [fileName, setFileName] = useState("");
+  const [supportError, setSupportError] = useState("");
 
-export default function App() {
-  const [userInfo, setUserInfo] = useState({
-    name: 'あなた', year: '1996年', month: '1月', day: '1日',
-    bloodType: 'A型', zodiacSign: '牡羊座', eto: '子（ね）'
-  });
-  const [usageCount, setUsageCount] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [fortune, setFortune] = useState<any>(null);
+  const recognitionRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafRef = useRef(null);
+  const micLevelRef = useRef(0);
+  const isRecordingRef = useRef(false);
 
-  // 利用回数の読み込み [cite: 2026-01-03]
+  // マイク音量の閾値。これより小さい音（雑音・無音）は文字起こしに反映しない
+  const NOISE_THRESHOLD = 12;
+
   useEffect(() => {
-    const today = new Date().toLocaleDateString();
-    const storedUsage = localStorage.getItem('fortune_usage');
-    if (storedUsage) {
-      const { date, count } = JSON.parse(storedUsage);
-      if (date === today) setUsageCount(count);
-    }
+    return () => stopEverything();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (usageCount >= MAX_USAGE) return;
+  const stopEverything = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.onresult = null;
+      recognitionRef.current.onend = null;
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+    }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+    }
+    if (audioCtxRef.current) {
+      try {
+        audioCtxRef.current.close();
+      } catch (e) {}
+    }
+    setMicLevel(0);
+    micLevelRef.current = 0;
+  };
 
-    setIsLoading(true);
+  const monitorVolume = () => {
+    if (!analyserRef.current) return;
+    const data = new Uint8Array(analyserRef.current.frequencyBinCount);
+    const tick = () => {
+      if (!analyserRef.current) return;
+      analyserRef.current.getByteFrequencyData(data);
+      const avg = data.reduce((a, b) => a + b, 0) / data.length;
+      const level = Math.min(100, Math.round((avg / 255) * 100 * 2));
+      setMicLevel(level);
+      micLevelRef.current = level;
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+  };
+
+  const startRecording = async () => {
+    setSupportError("");
+    setTranscript("");
+    setInterim("");
+    setMinutes(null);
+
+    const SpeechRecognition =
+      typeof window !== "undefined" &&
+      (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+    if (!SpeechRecognition) {
+      setSupportError(
+        "お使いのブラウザは音声認識に対応していません。Google Chromeでお試しください。"
+      );
+      return;
+    }
+
     try {
-      const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY || "");
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash", // 【無料枠固定】 [cite: 2026-01-03]
-        systemInstruction: "精密AI鑑定師として、全体運・金運・健康運・恋愛運・仕事運をそれぞれ100文字程度の日本語で、JSON形式で返してください。"
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
       });
+      streamRef.current = stream;
 
-      const prompt = `${userInfo.year}${userInfo.month}${userInfo.day}生まれ、${userInfo.bloodType}、${userInfo.zodiacSign}、${userInfo.eto}の人の今日の運勢を詳しく占ってください。`;
-      const result = await model.generateContent(prompt);
-      const text = result.response.text().replace(/```json|```/g, '');
-      setFortune(JSON.parse(text));
-      
-      const newCount = usageCount + 1;
-      setUsageCount(newCount);
-      localStorage.setItem('fortune_usage', JSON.stringify({ date: new Date().toLocaleDateString(), count: newCount }));
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioContext();
+      audioCtxRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      monitorVolume();
+
+      const recognition = new SpeechRecognition();
+      recognition.lang = "ja-JP";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      recognition.onresult = (event) => {
+        let finalChunk = "";
+        let interimChunk = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const text = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            // 小さい音・雑音対策：その瞬間のマイク音量が閾値未満なら採用しない
+            if (micLevelRef.current >= NOISE_THRESHOLD) {
+              finalChunk += text;
+            }
+          } else {
+            interimChunk += text;
+          }
+        }
+        if (finalChunk) setTranscript((prev) => prev + finalChunk);
+        setInterim(interimChunk);
+      };
+
+      recognition.onerror = () => {};
+      recognition.onend = () => {
+        // 録音継続中に途切れたら自動で再開する
+        if (isRecordingRef.current) {
+          try {
+            recognition.start();
+          } catch (e) {}
+        }
+      };
+
+      recognition.start();
+      recognitionRef.current = recognition;
+      isRecordingRef.current = true;
+      setIsRecording(true);
     } catch (err) {
-      alert("APIキーが無効か、通信エラーです。");
-    } finally {
-      setIsLoading(false);
+      setSupportError("マイクへのアクセスが許可されませんでした。");
     }
   };
 
-  // 共通のセレクトボックス部品（白紙問題を解決するスタイルを適用）
-  const CustomSelect = ({ label, value, options, onChange }: any) => (
-    <div className="flex flex-col space-y-1">
-      <label className="text-xs font-bold text-indigo-300 ml-1">{label}</label>
-      <select 
-        value={value} 
-        onChange={(e) => onChange(e.target.value)}
-        style={{ 
-          backgroundColor: '#1e293b', // 濃い紺色で高級感を出す
-          color: '#ffffff',           // 文字は必ず白
-          border: '1px solid #4f46e5',
-          appearance: 'auto'          // ブラウザ標準の矢印を表示
-        }}
-        className="w-full p-3 rounded-lg text-base focus:ring-2 focus:ring-cyan-400 outline-none"
-      >
-        {options.map((opt: string) => (
-          <option key={opt} value={opt} style={{ backgroundColor: '#1e293b', color: '#ffffff' }}>{opt}</option>
-        ))}
-      </select>
-    </div>
-  );
+  const stopRecording = () => {
+    isRecordingRef.current = false;
+    setIsRecording(false);
+    stopEverything();
+    setRemaining((r) => Math.max(0, r - 1));
+  };
+
+  const handleToggleRecording = () => {
+    if (remaining <= 0 && !isRecording) return;
+    if (isRecording) stopRecording();
+    else startRecording();
+  };
+
+  const handleUpload = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) setFileName(file.name);
+  };
+
+  const summaryText = (text) => {
+    if (!text) return "";
+    const sentences = text.split(/(?<=[。.!?])/).filter(Boolean);
+    const picked = sentences.slice(0, Math.max(1, Math.ceil(sentences.length / 3)));
+    return picked.join("");
+  };
+
+  const displayedText = detailMode === "detail" ? transcript : summaryText(transcript);
+  const canGenerate = transcript.trim().length > 0 && !isRecording;
+
+  const generateMinutes = () => {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("ja-JP", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    setMinutes({
+      date: dateStr,
+      body: displayedText || "（内容がありません）",
+    });
+  };
 
   return (
-    <div className="min-h-screen bg-black text-white p-4 flex flex-col items-center font-sans">
-      <header className="py-10">
-        <h1 className="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400">
-          AI Fortune Teller
+    <div
+      className="min-h-screen w-full flex items-center justify-center p-6"
+      style={{
+        background: "linear-gradient(160deg, #64748b 0%, #475569 55%, #334155 100%)",
+      }}
+    >
+      <div className="w-full max-w-sm">
+        <h1 className="text-white font-bold text-lg mb-3 tracking-wide">
+          1. 音声を準備
         </h1>
-      </header>
 
-      <main className="w-full max-w-md bg-gray-900/50 p-8 rounded-3xl border border-white/10 shadow-2xl space-y-6">
-        <div className="text-center">
-          <span className="bg-indigo-900/50 text-cyan-300 px-4 py-1 rounded-full text-sm font-bold border border-cyan-500/30">
-            本日の残り回数：{MAX_USAGE - usageCount}回
-          </span>
+        {/* タブ */}
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => setInputMethod("mic")}
+            className={`flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition ${
+              inputMethod === "mic"
+                ? "bg-white text-rose-500 shadow-md"
+                : "bg-white/20 text-white/80"
+            }`}
+          >
+            <Mic size={16} /> マイクで録音
+          </button>
+          <button
+            onClick={() => setInputMethod("upload")}
+            className={`flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition ${
+              inputMethod === "upload"
+                ? "bg-white text-slate-700 shadow-md"
+                : "bg-white/20 text-white/80"
+            }`}
+          >
+            <UploadCloud size={16} /> アップロード
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <CustomSelect label="生誕年" value={userInfo.year} options={YEARS} onChange={(v:any)=>setUserInfo({...userInfo, year:v})} />
-          <div className="grid grid-cols-2 gap-4">
-            <CustomSelect label="月" value={userInfo.month} options={MONTHS} onChange={(v:any)=>setUserInfo({...userInfo, month:v})} />
-            <CustomSelect label="日" value={userInfo.day} options={DAYS} onChange={(v:any)=>setUserInfo({...userInfo, day:v})} />
-          </div>
-          <CustomSelect label="血液型" value={userInfo.bloodType} options={BLOOD_TYPES} onChange={(v:any)=>setUserInfo({...userInfo, bloodType:v})} />
-          <CustomSelect label="干支" value={userInfo.eto} options={ETO} onChange={(v:any)=>setUserInfo({...userInfo, eto:v})} />
+        {/* メインカード */}
+        <div className="bg-white rounded-3xl p-8 shadow-xl flex flex-col items-center justify-center min-h-[220px] border-2 border-dashed border-slate-200">
+          {inputMethod === "mic" ? (
+            <button
+              onClick={handleToggleRecording}
+              className="flex flex-col items-center gap-3 group"
+            >
+              <div
+                className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${
+                  isRecording
+                    ? "bg-rose-500 animate-pulse"
+                    : "bg-rose-100 group-hover:bg-rose-200"
+                }`}
+              >
+                {isRecording ? (
+                  <Square size={28} className="text-white" fill="white" />
+                ) : (
+                  <Mic size={32} className="text-rose-500" />
+                )}
+              </div>
+              <span className="font-bold text-slate-800">
+                {isRecording ? "録音中…タップで停止" : "録音を開始"}
+              </span>
+              {isRecording && (
+                <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1">
+                  <div
+                    className="h-full bg-rose-400 transition-all"
+                    style={{ width: `${micLevel}%` }}
+                  />
+                </div>
+              )}
+            </button>
+          ) : (
+            <label className="flex flex-col items-center gap-3 cursor-pointer">
+              <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition">
+                <UploadCloud size={30} className="text-slate-500" />
+              </div>
+              <span className="font-bold text-slate-800 text-center px-2">
+                {fileName || "音声ファイルを選択"}
+              </span>
+              <input type="file" accept="audio/*" className="hidden" onChange={handleUpload} />
+            </label>
+          )}
+        </div>
 
-          <button 
-            type="submit"
-            disabled={isLoading || usageCount >= MAX_USAGE}
-            className="w-full py-4 mt-4 bg-gradient-to-r from-purple-600 to-blue-500 hover:from-purple-500 hover:to-blue-400 rounded-2xl font-black text-lg transition-all shadow-lg active:scale-95 disabled:opacity-50"
+        {supportError && (
+          <p className="text-rose-200 text-xs text-center mt-2">{supportError}</p>
+        )}
+
+        {/* 注意書き */}
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-4 text-center">
+          <p className="text-amber-700 text-xs font-medium flex items-center justify-center gap-1">
+            <Lock size={12} /> 音声データは解析後に破棄されます
+          </p>
+          <p className="text-amber-600 text-xs mt-1">本日の残り利用回数：{remaining}回</p>
+        </div>
+
+        {/* 詳細 / 要約 切り替え */}
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={() => setDetailMode("detail")}
+            className={`flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition ${
+              detailMode === "detail" ? "bg-slate-800 text-white" : "bg-white/70 text-slate-500"
+            }`}
           >
-            {isLoading ? "運命を読み解き中..." : (usageCount >= MAX_USAGE ? "また明日お越しください" : "運勢を占う")}
+            <Scissors size={15} /> 詳細
           </button>
-        </form>
+          <button
+            onClick={() => setDetailMode("summary")}
+            className={`flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition ${
+              detailMode === "summary" ? "bg-slate-800 text-white" : "bg-white/70 text-slate-500"
+            }`}
+          >
+            <Zap size={15} /> 要約
+          </button>
+        </div>
 
-        {fortune && (
-          <div className="mt-8 p-6 bg-indigo-900/30 rounded-2xl border border-indigo-500/30 animate-in fade-in slide-in-from-bottom-4 duration-1000">
-            <h2 className="text-2xl font-bold text-center text-pink-300 mb-4">鑑定完了</h2>
-            <div className="space-y-4 text-sm leading-relaxed text-indigo-100">
-              <p>{fortune.overall?.text || fortune.overall || "素晴らしい一日になるでしょう。"}</p>
-            </div>
+        {/* 文字起こしプレビュー */}
+        {(transcript || interim) && (
+          <div className="bg-white/95 rounded-xl p-3 mt-4 text-sm text-slate-700 max-h-32 overflow-y-auto">
+            {displayedText}
+            <span className="text-slate-400">{interim}</span>
           </div>
         )}
-      </main>
-      
-      <footer className="mt-10 text-gray-500 text-xs">© 2026 AI Fortune Teller</footer>
+
+        {/* 議事録を生成 */}
+        <button
+          onClick={generateMinutes}
+          disabled={!canGenerate}
+          className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 mt-4 transition ${
+            canGenerate
+              ? "bg-slate-800 text-white hover:bg-slate-700"
+              : "bg-white/30 text-white/60 cursor-not-allowed"
+          }`}
+        >
+          <Sparkles size={16} /> 議事録を生成
+        </button>
+
+        {/* 結果表示 */}
+        {minutes && (
+          <div className="bg-white rounded-2xl p-5 mt-4 shadow-xl">
+            <h2 className="font-bold text-slate-800 mb-1">議事録</h2>
+            <p className="text-xs text-slate-400 mb-3">{minutes.date}</p>
+            <p className="text-sm text-slate-700 whitespace-pre-wrap">{minutes.body}</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

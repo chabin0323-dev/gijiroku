@@ -10,20 +10,14 @@ export default function GijirokuApp() {
   const [interim, setInterim] = useState("");
   const [detailMode, setDetailMode] = useState("detail"); // 'detail' | 'summary'
   const [minutes, setMinutes] = useState(null);
-  const [micLevel, setMicLevel] = useState(0);
   const [fileName, setFileName] = useState("");
   const [supportError, setSupportError] = useState("");
 
   const recognitionRef = useRef(null);
-  const audioCtxRef = useRef(null);
-  const analyserRef = useRef(null);
-  const streamRef = useRef(null);
-  const rafRef = useRef(null);
-  const micLevelRef = useRef(0);
   const isRecordingRef = useRef(false);
 
-  // マイク音量の閾値。これより小さい音（雑音・無音）は文字起こしに反映しない
-  const NOISE_THRESHOLD = 12;
+  // 認識結果の信頼度がこれ未満（雑音・小さい声など）の場合は採用しない
+  const CONFIDENCE_THRESHOLD = 0.5;
 
   useEffect(() => {
     return () => stopEverything();
@@ -34,39 +28,14 @@ export default function GijirokuApp() {
     if (recognitionRef.current) {
       recognitionRef.current.onresult = null;
       recognitionRef.current.onend = null;
+      recognitionRef.current.onerror = null;
       try {
         recognitionRef.current.stop();
       } catch (e) {}
     }
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-    }
-    if (audioCtxRef.current) {
-      try {
-        audioCtxRef.current.close();
-      } catch (e) {}
-    }
-    setMicLevel(0);
-    micLevelRef.current = 0;
   };
 
-  const monitorVolume = () => {
-    if (!analyserRef.current) return;
-    const data = new Uint8Array(analyserRef.current.frequencyBinCount);
-    const tick = () => {
-      if (!analyserRef.current) return;
-      analyserRef.current.getByteFrequencyData(data);
-      const avg = data.reduce((a, b) => a + b, 0) / data.length;
-      const level = Math.min(100, Math.round((avg / 255) * 100 * 2));
-      setMicLevel(level);
-      micLevelRef.current = level;
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    tick();
-  };
-
-  const startRecording = async () => {
+  const startRecording = () => {
     setSupportError("");
     setTranscript("");
     setInterim("");
@@ -83,67 +52,52 @@ export default function GijirokuApp() {
       return;
     }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-      streamRef.current = stream;
+    const recognition = new SpeechRecognition();
+    recognition.lang = "ja-JP";
+    recognition.continuous = true;
+    recognition.interimResults = true;
 
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      const audioCtx = new AudioContext();
-      audioCtxRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-      monitorVolume();
+    recognition.onresult = (event) => {
+      let finalChunk = "";
+      let interimChunk = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const text = result[0].transcript;
+        const confidence = typeof result[0].confidence === "number" ? result[0].confidence : 1;
 
-      const recognition = new SpeechRecognition();
-      recognition.lang = "ja-JP";
-      recognition.continuous = true;
-      recognition.interimResults = true;
-
-      recognition.onresult = (event) => {
-        let finalChunk = "";
-        let interimChunk = "";
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const text = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            // 小さい音・雑音対策：その瞬間のマイク音量が閾値未満なら採用しない
-            if (micLevelRef.current >= NOISE_THRESHOLD) {
-              finalChunk += text;
-            }
-          } else {
-            interimChunk += text;
+        if (result.isFinal) {
+          // 小さい声・雑音対策：信頼度が低い、または極端に短い結果は採用しない
+          if (confidence >= CONFIDENCE_THRESHOLD || confidence === 0) {
+            finalChunk += text;
           }
+        } else {
+          interimChunk += text;
         }
-        if (finalChunk) setTranscript((prev) => prev + finalChunk);
-        setInterim(interimChunk);
-      };
+      }
+      if (finalChunk) setTranscript((prev) => prev + finalChunk);
+      setInterim(interimChunk);
+    };
 
-            recognition.onerror = (event) => {
-        setSupportError(`音声認識エラー: ${event.error}`);
-      };
-      recognition.onend = () => {
-        // 録音継続中に途切れたら自動で再開する
-        if (isRecordingRef.current) {
-          try {
-            recognition.start();
-          } catch (e) {}
-        }
-      };
+    recognition.onerror = (event) => {
+      setSupportError(`音声認識エラー: ${event.error}`);
+    };
 
+    recognition.onend = () => {
+      // 録音継続中に途切れたら自動で再開する
+      if (isRecordingRef.current) {
+        try {
+          recognition.start();
+        } catch (e) {}
+      }
+    };
+
+    try {
       recognition.start();
       recognitionRef.current = recognition;
       isRecordingRef.current = true;
       setIsRecording(true);
     } catch (err) {
-      setSupportError("マイクへのアクセスが許可されませんでした。");
+      setSupportError("音声認識を開始できませんでした。");
     }
   };
 
@@ -254,14 +208,6 @@ export default function GijirokuApp() {
               <span className="font-bold text-slate-800">
                 {isRecording ? "録音中…タップで停止" : "録音を開始"}
               </span>
-              {isRecording && (
-                <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1">
-                  <div
-                    className="h-full bg-rose-400 transition-all"
-                    style={{ width: `${micLevel}%` }}
-                  />
-                </div>
-              )}
             </button>
           ) : (
             <label className="flex flex-col items-center gap-3 cursor-pointer">

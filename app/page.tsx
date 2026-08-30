@@ -126,7 +126,9 @@ export default function GijirokuApp() {
         setInterim(interimChunk);
       };
 
-      recognition.onerror = () => {};
+            recognition.onerror = (event) => {
+        setSupportError(`音声認識エラー: ${event.error}`);
+      };
       recognition.onend = () => {
         // 録音継続中に途切れたら自動で再開する
         if (isRecordingRef.current) {

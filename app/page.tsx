@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Mic, UploadCloud, Lock, Scissors, Zap, Sparkles, Square } from "lucide-react";
+import { Mic, UploadCloud, Lock, Scissors, Zap, Sparkles, Square, Trash2 } from "lucide-react";
 
 export default function GijirokuApp() {
   const [inputMethod, setInputMethod] = useState("mic"); // 'mic' | 'upload'
@@ -9,7 +9,6 @@ export default function GijirokuApp() {
   const [transcript, setTranscript] = useState("");
   const [interim, setInterim] = useState("");
   const [detailMode, setDetailMode] = useState("detail"); // 'detail' | 'summary'
-  const [remaining, setRemaining] = useState(5);
   const [minutes, setMinutes] = useState(null);
   const [micLevel, setMicLevel] = useState(0);
   const [fileName, setFileName] = useState("");
@@ -150,11 +149,9 @@ export default function GijirokuApp() {
     isRecordingRef.current = false;
     setIsRecording(false);
     stopEverything();
-    setRemaining((r) => Math.max(0, r - 1));
   };
 
   const handleToggleRecording = () => {
-    if (remaining <= 0 && !isRecording) return;
     if (isRecording) stopRecording();
     else startRecording();
   };
@@ -173,6 +170,13 @@ export default function GijirokuApp() {
 
   const displayedText = detailMode === "detail" ? transcript : summaryText(transcript);
   const canGenerate = transcript.trim().length > 0 && !isRecording;
+
+  const handleDeleteData = () => {
+    setTranscript("");
+    setInterim("");
+    setMinutes(null);
+    setFileName("");
+  };
 
   const generateMinutes = () => {
     const now = new Date();
@@ -275,11 +279,19 @@ export default function GijirokuApp() {
         )}
 
         {/* 注意書き */}
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-4 text-center">
-          <p className="text-amber-700 text-xs font-medium flex items-center justify-center gap-1">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-4 flex items-center justify-between gap-2">
+          <p className="text-amber-700 text-xs font-medium flex items-center gap-1">
             <Lock size={12} /> 音声データは解析後に破棄されます
           </p>
-          <p className="text-amber-600 text-xs mt-1">本日の残り利用回数：{remaining}回</p>
+          {(transcript || minutes || fileName) && (
+            <button
+              onClick={handleDeleteData}
+              title="録音データを今すぐ削除"
+              className="shrink-0 w-7 h-7 rounded-full bg-amber-100 hover:bg-amber-200 flex items-center justify-center transition"
+            >
+              <Trash2 size={14} className="text-amber-700" />
+            </button>
+          )}
         </div>
 
         {/* 詳細 / 要約 切り替え */}

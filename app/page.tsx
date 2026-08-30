@@ -188,13 +188,15 @@ export default function GijirokuApp() {
   };
 
   return (
-    <div
-      className="min-h-screen w-full flex items-center justify-center p-6"
-      style={{
-        background: "linear-gradient(160deg, #64748b 0%, #475569 55%, #334155 100%)",
-      }}
-    >
-      <div className="w-full max-w-sm">
+    <div className="min-h-screen w-full flex items-center justify-center p-6 bg-slate-950">
+      {/* スマホ風の外枠 */}
+      <div className="w-full max-w-sm rounded-[2.5rem] border-[6px] border-slate-800 shadow-2xl overflow-hidden">
+        <div
+          className="p-6"
+          style={{
+            background: "linear-gradient(160deg, #64748b 0%, #475569 55%, #334155 100%)",
+          }}
+        >
         <h1 className="text-white font-bold text-lg mb-3 tracking-wide">
           1. 音声を準備
         </h1>
@@ -329,6 +331,7 @@ export default function GijirokuApp() {
             <p className="text-sm text-slate-700 whitespace-pre-wrap">{minutes.body}</p>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

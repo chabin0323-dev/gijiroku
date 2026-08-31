@@ -1,16 +1,16 @@
 "use client";
 
 import React, { useState, useRef } from "react";
-import { Mic, UploadCloud, Lock, Scissors, Zap, Sparkles, Square, Trash2 } from "lucide-react";
+import { Mic, ClipboardPaste, Lock, Scissors, Zap, Sparkles, Square, Trash2 } from "lucide-react";
 
 export default function GijirokuApp() {
-  const [inputMethod, setInputMethod] = useState("mic"); // 'mic' | 'upload'
+  const [inputMethod, setInputMethod] = useState("mic"); // 'mic' | 'paste'
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [interim, setInterim] = useState("");
+  const [pasteText, setPasteText] = useState("");
   const [detailMode, setDetailMode] = useState("detail"); // 'detail' | 'summary'
   const [minutes, setMinutes] = useState(null);
-  const [fileName, setFileName] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
 
   const recognitionRef = useRef(null);
@@ -68,7 +68,6 @@ export default function GijirokuApp() {
     };
 
     recognition.onerror = (event) => {
-      // no-speech（無音）は録音を止めない。それ以外は表示する
       if (event.error === "no-speech") return;
       setStatusMessage(`音声認識エラー: ${event.error}`);
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
@@ -99,7 +98,6 @@ export default function GijirokuApp() {
     isRecordingRef.current = false;
     setIsRecording(false);
     stopRecognition();
-    // 停止時点で確定していない「仮の文字」も、そのまま議事録の対象に取り込む
     if (interimRef.current) {
       setTranscript((prev) => prev + interimRef.current);
       interimRef.current = "";
@@ -112,15 +110,8 @@ export default function GijirokuApp() {
     else startRecording();
   };
 
-  const handleUpload = (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (file) {
-      setFileName(file.name);
-      setStatusMessage(
-        "音声ファイルからの自動文字起こしは、現在マイク録音のみ対応しています（今後対応予定）。"
-      );
-    }
-  };
+  // マイクで録音したテキストと、貼り付けたテキストのどちらか入っている方を使う
+  const sourceText = inputMethod === "mic" ? transcript : pasteText;
 
   const summaryText = (text) => {
     if (!text) return "";
@@ -129,14 +120,14 @@ export default function GijirokuApp() {
     return picked.join("");
   };
 
-  const displayedText = detailMode === "detail" ? transcript : summaryText(transcript);
-  const canGenerate = transcript.trim().length > 0 && !isRecording;
+  const displayedText = detailMode === "detail" ? sourceText : summaryText(sourceText);
+  const canGenerate = sourceText.trim().length > 0 && !isRecording;
 
   const handleDeleteData = () => {
     setTranscript("");
     setInterim("");
+    setPasteText("");
     setMinutes(null);
-    setFileName("");
   };
 
   const generateMinutes = () => {
@@ -175,14 +166,14 @@ export default function GijirokuApp() {
               <Mic size={16} /> マイクで録音
             </button>
             <button
-              onClick={() => setInputMethod("upload")}
+              onClick={() => setInputMethod("paste")}
               className={`flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition ${
-                inputMethod === "upload"
+                inputMethod === "paste"
                   ? "bg-white text-slate-700 shadow-md"
                   : "bg-white/20 text-white/80"
               }`}
             >
-              <UploadCloud size={16} /> アップロード
+              <ClipboardPaste size={16} /> テキスト貼付
             </button>
           </div>
 
@@ -210,15 +201,17 @@ export default function GijirokuApp() {
                 </span>
               </button>
             ) : (
-              <label className="flex flex-col items-center gap-3 cursor-pointer">
-                <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition">
-                  <UploadCloud size={30} className="text-slate-500" />
-                </div>
-                <span className="font-bold text-slate-800 text-center px-2">
-                  {fileName || "音声ファイルを選択"}
-                </span>
-                <input type="file" accept="audio/*" className="hidden" onChange={handleUpload} />
-              </label>
+              <div className="w-full flex flex-col gap-2">
+                <p className="text-xs text-slate-500 text-center">
+                  Gemini・ChatGPTなど高精度な文字起こしアプリで作った文章を、下に貼り付けてください
+                </p>
+                <textarea
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  placeholder="ここに文字起こしされたテキストを貼り付け"
+                  className="w-full h-28 rounded-xl border border-slate-200 p-3 text-sm text-slate-700 outline-none focus:border-rose-300 resize-none"
+                />
+              </div>
             )}
           </div>
 
@@ -230,10 +223,10 @@ export default function GijirokuApp() {
             <p className="text-amber-700 text-xs font-medium flex items-center gap-1">
               <Lock size={12} /> 音声データは解析後に破棄されます
             </p>
-            {(transcript || minutes || fileName) && (
+            {(transcript || pasteText || minutes) && (
               <button
                 onClick={handleDeleteData}
-                title="録音データを今すぐ削除"
+                title="データを今すぐ削除"
                 className="shrink-0 w-7 h-7 rounded-full bg-amber-100 hover:bg-amber-200 flex items-center justify-center transition"
               >
                 <Trash2 size={14} className="text-amber-700" />
@@ -260,10 +253,15 @@ export default function GijirokuApp() {
             </button>
           </div>
 
-          {(transcript || interim) && (
+          {inputMethod === "mic" && (transcript || interim) && (
             <div className="bg-white/95 rounded-xl p-3 mt-4 text-sm text-slate-700 max-h-32 overflow-y-auto">
               {displayedText}
               <span className="text-slate-400">{interim}</span>
+            </div>
+          )}
+          {inputMethod === "paste" && pasteText && (
+            <div className="bg-white/95 rounded-xl p-3 mt-4 text-sm text-slate-700 max-h-32 overflow-y-auto">
+              {displayedText}
             </div>
           )}
 

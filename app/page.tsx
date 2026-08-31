@@ -15,6 +15,7 @@ export default function GijirokuApp() {
 
   const recognitionRef = useRef(null);
   const isRecordingRef = useRef(false);
+  const interimRef = useRef("");
 
   const stopRecognition = () => {
     if (recognitionRef.current) {
@@ -63,6 +64,7 @@ export default function GijirokuApp() {
       }
       if (finalChunk) setTranscript((prev) => prev + finalChunk);
       setInterim(interimChunk);
+      interimRef.current = interimChunk;
     };
 
     recognition.onerror = (event) => {
@@ -97,6 +99,12 @@ export default function GijirokuApp() {
     isRecordingRef.current = false;
     setIsRecording(false);
     stopRecognition();
+    // 停止時点で確定していない「仮の文字」も、そのまま議事録の対象に取り込む
+    if (interimRef.current) {
+      setTranscript((prev) => prev + interimRef.current);
+      interimRef.current = "";
+      setInterim("");
+    }
   };
 
   const handleToggleRecording = () => {
